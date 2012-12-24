@@ -1,17 +1,29 @@
-Label format:
+Internal label format:
   tuple of ints; index successive arrays
+  optional argument to exec() specifies starting index
 
 
 Interpreter flow:
   notes on conditionals:
     conditionals are evaluated before the rest of the block
+    conditionals should execute before:
+      choices
+      randoms
   some groups of statements evaluate as a group
     choices within a condition are part of the enclosing group of choices
   words (narration/speech/etc) execute immediately
   method calls execute immediately
+
 
 Methods:
   anything that is an expression with more than one word is interpreted as a
     series of method calls. ex: foo bar baz => foo(bar(baz))
   methods are limited to one argument
   currently no syntax to define methods
+
+
+Proposed language modifications:
+  Invert nesting of choices and conditionals
+    doesn't allow multiple children of a conditional
+    makes it easier to run blocks; can execute in-order
+    harder to express multiple conditions
