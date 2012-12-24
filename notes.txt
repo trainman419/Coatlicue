@@ -27,3 +27,5 @@ Proposed language modifications:
     doesn't allow multiple children of a conditional
     makes it easier to run blocks; can execute in-order
     harder to express multiple conditions
+  Labels should be indented with everything else, or should at least be
+    inserted into the parse tree in the appropriate place in the block
