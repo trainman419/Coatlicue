@@ -69,7 +69,7 @@ def run_conditionals(sequence, state):
    return (i, ret)
 
 # Present the user with a set of choices and execute the result
-def run_choices(choices, state):
+def run_choices(choices, state, randoms):
    # Print the choices
    for i,c in enumerate(choices):
       print "%d) %s"%(i+1, c['content'])
@@ -94,13 +94,18 @@ def run_choices(choices, state):
    while len(choices):
       choices.pop()
    if 'children' in choice:
-      ret = run_section(choice['children'], state, choices = choices)
+      ret = run_section(choice['children'], state, choices = choices,
+            randoms = randoms)
    return ret
 
 # Pick a random thing and do it
 def run_random(randoms, state):
    c = random.choice(randoms)
-   return run_section([c], state)
+   # empty the list without assigning an empty list, so that a higher
+   #  invocation will see our changes
+   while len(randoms):
+      randoms.pop()
+   return run_section(c['children'], state)
 
 def run_section(sequence, state, start = None, choices = [], randoms = []):
    i = 0
@@ -127,15 +132,11 @@ def run_section(sequence, state, start = None, choices = [], randoms = []):
 
       elif len(choices) > 0 and part['type'] != 'choice':
          j = 0
-         ret = run_choices(choices, state)
+         ret = run_choices(choices, state, randoms)
 
       elif len(randoms) > 0 and part['type'] != 'random_block':
          j = 0
          ret = run_random(randoms, state)
-         # empty the list without assigning an empty list, so that a higher
-         #  invocation will see our changes
-         while len(randoms):
-            randoms.pop()
 
       elif part['type'] == 'random_block':
          randoms.append(part)
@@ -230,7 +231,7 @@ if __name__ == '__main__':
       n = run_section(data['main'], state, jump['main'], choices, randoms)
       while n or len(choices) > 0 or len(randoms) > 0:
          if len(choices) > 0:
-            n = run_choices(choices, state)
+            n = run_choices(choices, state, randoms)
          if len(randoms) > 0:
             n = run_random(randoms, state)
             randoms = []
