@@ -4,44 +4,78 @@ import json
 import sys
 import random
 
+use_magic = False
+
+# take a string and execute it as a series of function calls
+def call(string, state):
+   functions = {'no': lambda arg: arg == 0,
+         'not': lambda arg: not arg,
+         'use_magic': lambda arg: use_magic }
+   args = string.split(' ')
+   # temporary argument; already evaluated
+   arg = args.pop()
+   if arg in state:
+      arg = state[arg]
+   else:
+      #print "WARNING: %s is not a variable; assuming string literal"%(arg)
+      # Assume aregument is undefined
+      state[arg] = 0
+      arg = 0
+
+   while len(args) > 0:
+      fun = args.pop()
+      if fun in functions:
+         arg = functions[fun](arg)
+      else:
+         print "ERROR: tried to call undefined function %s"%(fun)
+         return False
+   return arg
+
+# Run one level of conditionals
+# return the number of statements consumed, and the block that should be run
+#  as a result of this conditional (or None if the conditional evaluated to
+#  false and did not have a default section)
 def run_conditionals(sequence, state):
    i = 0
    ret = None
    match = False
+
+   parts = []
+
+   parts.append(sequence[i])
+   i = 1
    while i < len(sequence) and (
          sequence[i]['type'] == 'condition_call' or 
-         sequence[i]['type'] == 'condition'):
-      if not match:
-         c = sequence[i]['content']
-         if sequence[i]['type'] == 'condition':
-            if c in state and state[c]:
-               match = True
-               ret = run_section(sequence[i]['children'], state)
-         else:
-            print "ERROR: Can't evaluate calls in conditionals yet"
+         sequence[i]['type'] == 'condition_fallback'):
+      parts.append(sequence[i])
       i += 1
+
+   for p in parts:
+      c = p['content']
+      # call can handle raw variables names as well as functions
+      #  this eliminates the need to disabiguate between fallback options
+      #  that are calls vs variables, since this isn't specified in the 
+      #  parse tree
+      if call(c, state):
+         match = True
+         ret = p['children']
+         break
 
    if i < len(sequence) and sequence[i]['type'] == 'condition_default':
       if not match:
-         ret = run_section(sequence[i]['children'], state)
+         ret = sequence[i]['children']
       i += 1
 
-   if ret:
-      return ret
-   return i
+   return (i, ret)
 
-def run_choices(sequence, state):
-   i = 0
-   choices = []
-   while i < len(sequence) and sequence[i]['type'] == 'choice':
-      choices.append(sequence[i])
-      i += 1
-
+# Present the user with a set of choices and execute the result
+def run_choices(choices, state):
+   # Print the choices
    for i,c in enumerate(choices):
       print "%d) %s"%(i+1, c['content'])
-
    print
 
+   # Get input from the user. Prompt them until the give us an answer we like
    i = None
    while i is None:
       try:
@@ -52,34 +86,64 @@ def run_choices(sequence, state):
          print "Please enter a number between 1 and %d"%(len(choices))
          i = None
 
-   if 'children' in choices[i-1]:
-      ret = run_section(choices[i-1]['children'], state)
-      if ret:
-         return ret
-   return len(choices)
+   # Do the thing specified by the user
+   ret = None
+   choice = choices[i-1]
+   # empty the list without assigning an empty list, so that a higher
+   #  invocation will see our changes
+   while len(choices):
+      choices.pop()
+   if 'children' in choice:
+      ret = run_section(choice['children'], state, choices = choices)
+   return ret
 
-def run_random(sequence, state):
+# Pick a random thing and do it
+def run_random(randoms, state):
+   c = random.choice(randoms)
+   return run_section([c], state)
+
+def run_section(sequence, state, start = None, choices = [], randoms = []):
    i = 0
-   choices = []
-   while i < len(sequence) and sequence[i]['type'] == 'random_block':
-      choices.append(sequence[i]['children'])
-      i += 1
+   if start:
+      i = start[0]
+      if len(start) > 1:
+         ret = run_section(sequence[i]['children'], state, start[1:], choices,
+               randoms)
+         if ret:
+            return ret
+         else:
+            i += 1
 
-   c = random.choice(choices)
-
-   ret = run_section(c, state)
-   if ret:
-      return ret
-   return len(choices)
-
-
-def run_section(sequence, state):
-   i = 0
    while i < len(sequence):
       j = 1
       part = sequence[i]
+      ret = None
 
-      if part['type'] in ['descriptive', 'narration', 'action', 'comment']:
+      if part['type'].startswith('condition'):
+         (j, blocks) = run_conditionals(sequence[i:], state)
+         if blocks:
+            ret = run_section(blocks, state, choices = choices, 
+                  randoms = randoms)
+
+      elif len(choices) > 0 and part['type'] != 'choice':
+         j = 0
+         ret = run_choices(choices, state)
+
+      elif len(randoms) > 0 and part['type'] != 'random_block':
+         j = 0
+         ret = run_random(randoms, state)
+         # empty the list without assigning an empty list, so that a higher
+         #  invocation will see our changes
+         while len(randoms):
+            randoms.pop()
+
+      elif part['type'] == 'random_block':
+         randoms.append(part)
+
+      elif part['type'] == 'choice':
+         choices.append(part)
+
+      elif part['type'] in ['descriptive', 'narration', 'action', 'comment']:
          print part['content']
          print
 
@@ -87,35 +151,13 @@ def run_section(sequence, state):
          print "%s: %s"%(part['actor'], part['content'])
          print
 
-      elif part['type'] == 'random_block':
-         ret = run_random(sequence[i:], state)
-         if type(ret) == int:
-            j = ret
-         else:
-            return ret
-
-      elif part['type'].startswith('condition'):
-         ret = run_conditionals(sequence[i:], state)
-         if type(ret) == int:
-            j = ret
-         else:
-            return ret
-
       elif part['type'] == 'sequence':
          if 'children' in part:
-            ret = run_section(part['children'])
-            if ret:
-               return ret
-
-      elif part['type'] == 'choice':
-         ret = run_choices(sequence[i:], state)
-         if type(ret) == int:
-            j = ret
-         else:
-            return ret
+            ret = run_section(part['children'], state, choices = choices, 
+                  randoms = randoms)
 
       elif part['type'] == 'link':
-         return part['jump']
+         ret = part['jump']
 
       elif part['type'] == 'assignment':
          var = None
@@ -137,20 +179,30 @@ def run_section(sequence, state):
             pass
          state[var] = value
 
+      elif part['type'] == 'increment':
+         state[part['variable']] += 1
+
+      elif part['type'] == 'decrement':
+         state[part['variable']] -= 1
 
       else:
          print "ERROR: Unknown type %s"%(part['type'])
+
+      if ret:
+         return ret
       
       i += j
 
    return None
 
-def add_jumps(block, jumps):
+def add_jumps(block, jumps, path):
    for i, b in enumerate(block):
+      p = path[:]
+      p.append(i)
       if b['type'] == 'sequence':
-         jumps[b['content']] = block[i:]
+         jumps[b['content']] = p
       if 'children' in b:
-         add_jumps(b['children'], jumps)
+         add_jumps(b['children'], jumps, p)
 
 
 if __name__ == '__main__':
@@ -164,7 +216,7 @@ if __name__ == '__main__':
    # build a jump table
    jump = {}
 
-   add_jumps(data['main'], jump)
+   add_jumps(data['main'], jump, [])
 
    if not 'main' in jump:
       print "No main section found; aborting"
@@ -173,8 +225,16 @@ if __name__ == '__main__':
    state = {}
 
    try:
-      n = run_section(jump['main'], state)
-      while n:
-         n = run_section(jump[n], state)
+      choices = []
+      randoms = []
+      n = run_section(data['main'], state, jump['main'], choices, randoms)
+      while n or len(choices) > 0 or len(randoms) > 0:
+         if len(choices) > 0:
+            n = run_choices(choices, state)
+         if len(randoms) > 0:
+            n = run_random(randoms, state)
+            randoms = []
+         if n:
+            n = run_section(data['main'], state, jump[n], choices, randoms)
    except KeyboardInterrupt:
       print "Done"
